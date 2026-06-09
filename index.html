@@ -25,7 +25,6 @@
     --danger-light: #f5e8e8;
   }
 
-
   html, body {
     height: 100%;
     background: var(--cream);
@@ -504,9 +503,12 @@ import { ESPLoader, Transport } from "https://unpkg.com/esptool-js@0.5.7/bundle.
 // ─── CONFIG ─────────────────────────────────────────────────────────────────
 // Replace these with your actual hosted firmware details
 const FIRMWARE_VERSION = "1.0.6";
-const FIRMWARE_URL = "https://cdn.shopify.com/s/files/1/0932/8685/9017/files/habity-1.0.6.bin?v=1780951531";
-// Flash offset for ESP32-S3 app partition (usually 0x10000 for OTA, or 0x0 for full flash)
-const FLASH_OFFSET = 0x20000;
+// Firmware files to flash in order
+const FIRMWARE_FILES = [
+  { url: "https://cdn.shopify.com/s/files/1/0932/8685/9017/files/bootloader-2.bin?v=1780985729", address: 0x0,     label: "Bootloader" },
+  { url: "https://cdn.shopify.com/s/files/1/0932/8685/9017/files/partition-table.bin?v=1780985730", address: 0x8000,  label: "Partition table" },
+  { url: "https://cdn.shopify.com/s/files/1/0932/8685/9017/files/habity-1.0.6.bin?v=1780951531", address: 0x20000, label: "Firmware" },
+];
 // ─────────────────────────────────────────────────────────────────────────────
 
 document.getElementById('fwVersionDisplay').textContent = 'v' + FIRMWARE_VERSION;
@@ -587,12 +589,21 @@ mainBtn.addEventListener('click', async () => {
   setStepState(2, 'active');
   setStatus('Downloading update…');
 
-  // ── STEP 2: Fetch firmware binary
-  let firmwareData;
+  // ── STEP 2: Fetch all firmware binaries
+  let fileArray = [];
   try {
-    const resp = await fetch(FIRMWARE_URL);
-    if (!resp.ok) throw new Error('HTTP ' + resp.status);
-    firmwareData = await resp.arrayBuffer();
+    for (let i = 0; i < FIRMWARE_FILES.length; i++) {
+      const f = FIRMWARE_FILES[i];
+      setProgress(Math.round((i / FIRMWARE_FILES.length) * 20), 'Downloading ' + f.label + '…');
+      setStatus('Downloading ' + f.label + '…');
+      const resp = await fetch(f.url);
+      if (!resp.ok) throw new Error('Download failed for ' + f.label + ' (' + resp.status + ')');
+      const buf = await resp.arrayBuffer();
+      const bytes = new Uint8Array(buf);
+      let binaryStr = '';
+      for (let j = 0; j < bytes.length; j++) binaryStr += String.fromCharCode(bytes[j]);
+      fileArray.push({ data: binaryStr, address: f.address });
+    }
   } catch (e) {
     setStatus('Could not download firmware: ' + e.message, 'err');
     state = 'idle';
@@ -624,26 +635,18 @@ mainBtn.addEventListener('click', async () => {
     setProgress(10, 'Preparing for install…');
     setStatus('Connected — preparing device…');
 
-    // esptool-js requires latin1 string, not ArrayBuffer
-    const bytes = new Uint8Array(firmwareData);
-    let binaryStr = '';
-    for (let i = 0; i < bytes.length; i++) {
-      binaryStr += String.fromCharCode(bytes[i]);
-    }
-
-    const fileArray = [{ data: binaryStr, address: FLASH_OFFSET }];
-
     await loader.writeFlash({
       fileArray,
       flashSize: 'keep',
       flashMode: 'keep',
       flashFreq: 'keep',
-      eraseAll: false,
+      eraseAll: true,
       compress: true,
       reportProgress(fileIndex, written, total) {
-        const pct = 10 + Math.round((written / total) * 88);
-        setProgress(pct, 'Installing update…');
-        setStatus('Installing… ' + Math.round((written / total) * 100) + '% complete');
+        const filePct = (written / total) * 100;
+        const overallPct = 20 + Math.round(((fileIndex + written / total) / FIRMWARE_FILES.length) * 78);
+        setProgress(overallPct, 'Installing ' + FIRMWARE_FILES[fileIndex].label + '…');
+        setStatus('Installing ' + FIRMWARE_FILES[fileIndex].label + '… ' + Math.round(filePct) + '% complete');
       }
     });
 
