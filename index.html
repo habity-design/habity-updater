@@ -635,6 +635,15 @@ mainBtn.addEventListener('click', async () => {
     setProgress(10, 'Preparing for install…');
     setStatus('Connected — preparing device…');
 
+    // Give the SD card controller time to settle while the ESP32
+    // is in bootloader mode and nothing is touching the SD bus
+    const SETTLE_SECONDS = 15;
+    for (let s = SETTLE_SECONDS; s > 0; s--) {
+      setProgress(10 + Math.round(((SETTLE_SECONDS - s) / SETTLE_SECONDS) * 8), 'Settling device… ' + s + 's');
+      setStatus('Preparing your Habity clock…');
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+
     await loader.writeFlash({
       fileArray,
       flashSize: 'keep',
